@@ -18,8 +18,8 @@ from eval_scale_vae_v1 import eval
 
 
 # Dataset
-train_file='datasets_20percent/yahoo/yahoo-train-20percent.hdf5'
-val_file='datasets_20percent/yahoo/yahoo-val-20percent.hdf5'
+train_file='datasets/yahoo/yahoo-train.hdf5'
+val_file='datasets/yahoo/yahoo-val.hdf5'
 test_file='datasets/yahoo/yahoo-test.hdf5'
 train_data=Dataset(train_file)
 val_data=Dataset(val_file)
@@ -41,7 +41,7 @@ PATIENCE = 5
 BETA=0.1
 MAX_GRAD_NORM=5
 CHECKPOINT_PATH='baseline.pt'
-PRINT_EVERY=100 
+PRINT_EVERY=80 
 MAX_LR_DECAY_ITER=5
 
 # SEED
@@ -116,14 +116,16 @@ for epoch in range(MAX_EPOCHS):
         # MODEL
         ## Encoder forward (Line 5)
         mean, logvar = model.encoder_forward(sentences)
+
         # Line 6
-        f=des_std/torch.std(mean)
-        f_list.append(f)
-        # Line 7-11
-        if iter <= f_epo:
-            scaled_mean = f * mean
-        else:
-            scaled_mean = scaled_f * mean
+        with torch.no_grad():
+            f=des_std/torch.std(mean)        
+            f_list.append(f.detach())
+            # Line 7-11
+            if iter <= f_epo:
+                scaled_mean = f * mean
+            else:
+                scaled_mean = scaled_f * mean
         
         ## Reparameterization trick (Line 12)
         z = model.reparameterize(scaled_mean, logvar)
@@ -134,20 +136,23 @@ for epoch in range(MAX_EPOCHS):
         # LOSS
         ## NLL Loss
         nll_vae=sum([criterion(predictions[:, l], sentences[:, l+1]) for l in range(length)])
-        train_nll_vae+=nll_vae.item()*batch_size
         ## KL Loss
         kl_vae = kl_loss.kl_loss_diag(mean, logvar)
-        train_kl_vae += kl_vae.data*batch_size        
         ## VAE Loss
         loss_scale = nll_vae + kl_weight*kl_vae          
         loss_scale.backward(retain_graph = True)
         
+        with torch.no_grad():
+            train_nll_vae+=nll_vae.item()*batch_size
+            train_kl_vae += kl_vae.data*batch_size        
         
         if MAX_GRAD_NORM > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)        
         optimizer.step()
-        num_sents += batch_size
-        num_words += batch_size * length
+        
+        with torch.no_grad():   
+            num_sents += batch_size
+            num_words += batch_size * length
         
         b += 1
         if b % PRINT_EVERY == 0:
@@ -163,8 +168,10 @@ for epoch in range(MAX_EPOCHS):
                    num_sents / (time.time() - start_time)))
 
     # Line 17 
-    stacked_f=torch.stack(f_list)
-    scaled_f = torch.mean(stacked_f,dim=0)
+    with torch.no_grad():   
+        stacked_f=torch.stack(f_list)
+        scaled_f = torch.mean(stacked_f,dim=0)
+    
     # Line 18
     iter+=1
     
