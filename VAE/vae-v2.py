@@ -20,9 +20,10 @@ from eval_vae_v1 import eval
 # Dataset
 train_file='datasets_10percent/yahoo/yahoo-train-10percent.hdf5'
 val_file='datasets_10percent/yahoo/yahoo-val-10percent.hdf5'
-test_file='datasets/yahoo/yahoo-test.hdf5'
+test_file='datasets_10percent/yahoo/yahoo-test-10percent.hdf5'
 train_data=Dataset(train_file)
 val_data=Dataset(val_file)
+test_data=Dataset(test_file)
 vocab_size=train_data.vocab_size
 
 
@@ -42,6 +43,7 @@ BETA=0.1
 MAX_GRAD_NORM=5
 CHECKPOINT_PATH='baseline.pt'
 PRINT_EVERY=80 
+MAX_LR_DECAY_ITER=10
 
 # SEED
 SEED=3435
@@ -62,8 +64,9 @@ model = RNNVAE( vocab_size = vocab_size,
                 dec_dropout = DROPOUT,
                 latent_dim = LATENT_DIM).to(device)
 
-for param in model.parameters():    
-    param.data.uniform_(-0.1, 0.1)
+
+# for param in model.parameters():    
+#     param.data.uniform_(-0.1, 0.1)
 
 
 # Optimizer
@@ -82,6 +85,13 @@ t = 0
 best_val_nll = 1e5
 best_epoch = 0
 val_stats = []
+
+des_std=1.1
+f_epo=1
+
+iter_learning_rate_decay=0
+iter=0
+
 for epoch in range(MAX_EPOCHS):
     start_time = time.time()
     
@@ -94,8 +104,10 @@ for epoch in range(MAX_EPOCHS):
     num_sents = 0
     num_words = 0
     b = 0
-    
-
+    f_list=[]
+    # line 4
+    print('--------------------------------')
+    print('Epoch: %d, Learning Rate: %.4f, KL Weight: %.4f' % (epoch, LEARNING_RATE, kl_weight))
     for i in np.random.permutation(len(train_data)):
         # Data
         sentences, length, batch_size = train_data[i]
@@ -105,31 +117,45 @@ for epoch in range(MAX_EPOCHS):
         optimizer.zero_grad()
         
         # MODEL
-        ## Encoder forward
+        ## Encoder forward (Line 5)
         mean, logvar = model.encoder_forward(sentences)
-        ## Reparameterization trick
+
+        # # Line 6
+        # with torch.no_grad():
+        #     f=des_std/torch.std(mean)        
+        #     f_list.append(f.detach())
+        #     # Line 7-11
+        #     if iter <= f_epo:
+        #         scaled_mean = f * mean
+        #     else:
+        #         scaled_mean = scaled_f * mean
+        
+        ## Reparameterization trick (Line 12)
         z = model.reparameterize(mean, logvar)
-        ## Decoder forward
+        ## Decoder forward (Line 13)
         predictions = model.decoder_forward(sentences, z)
         
         
         # LOSS
         ## NLL Loss
         nll_vae=sum([criterion(predictions[:, l], sentences[:, l+1]) for l in range(length)])
-        train_nll_vae+=nll_vae.item()*batch_size
         ## KL Loss
         kl_vae = kl_loss.kl_loss_diag(mean, logvar)
-        train_kl_vae += kl_vae.data*batch_size        
         ## VAE Loss
-        vae_loss = nll_vae + BETA*kl_vae          
-        vae_loss.backward(retain_graph = True)
+        loss_scale = nll_vae + kl_weight*kl_vae          
+        loss_scale.backward(retain_graph = True)
         
+        with torch.no_grad():
+            train_nll_vae+=nll_vae.item()*batch_size
+            train_kl_vae += kl_vae.data*batch_size        
         
         if MAX_GRAD_NORM > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)        
         optimizer.step()
-        num_sents += batch_size
-        num_words += batch_size * length
+        
+        with torch.no_grad():   
+            num_sents += batch_size
+            num_words += batch_size * length
         
         b += 1
         if b % PRINT_EVERY == 0:
@@ -141,9 +167,14 @@ for epoch in range(MAX_EPOCHS):
                    torch.exp(train_nll_vae/num_words), 
                    train_kl_vae / num_sents,
                    torch.exp((train_nll_vae + train_kl_vae)/num_words),
-                   param_norm, best_val_nll, best_epoch, BETA,
+                   param_norm, best_val_nll, best_epoch, kl_weight,
                    num_sents / (time.time() - start_time)))
 
+
+    
+    # Line 18
+    iter+=1
+    
     print('--------------------------------')
     print('Checking validation perf...')
     val_nll = eval(val_data, model,device)
@@ -157,8 +188,24 @@ for epoch in range(MAX_EPOCHS):
         'model': model,
         'val_stats': val_stats
       }
-      print('NLL Loss for Validation: ',val_nll)
       print('Saving checkpoint to %s' % CHECKPOINT_PATH)      
       torch.save(checkpoint, CHECKPOINT_PATH)
       model.cuda()
+    print('NLL Loss for Validation for epoch ',epoch,'-',val_nll)
     print('--------------------------------')
+
+    if abs(epoch - best_epoch) >= 5:
+        LEARNING_RATE *= DECAY_FACTOR
+        iter_learning_rate_decay+=1
+        best_epoch=epoch
+    
+    if iter_learning_rate_decay==MAX_LR_DECAY_ITER:
+        break
+      
+      
+
+# TESTING
+test_nll = eval(test_data, model,device)
+print('--------------------------------')
+print('NLL Loss for Test: ',test_nll)
+print('--------------------------------')

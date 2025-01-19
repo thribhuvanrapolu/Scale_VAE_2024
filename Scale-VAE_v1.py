@@ -18,11 +18,12 @@ from eval_scale_vae_v1 import eval
 
 
 # Dataset
-train_file='datasets/yahoo/yahoo-train.hdf5'
-val_file='datasets/yahoo/yahoo-val.hdf5'
-test_file='datasets/yahoo/yahoo-test.hdf5'
+train_file='datasets_10percent/yahoo/yahoo-train-10percent.hdf5'
+val_file='datasets_10percent/yahoo/yahoo-val-10percent.hdf5'
+test_file='datasets_10percent/yahoo/yahoo-test-10percent.hdf5'
 train_data=Dataset(train_file)
 val_data=Dataset(val_file)
+test_data=Dataset(test_file)
 vocab_size=train_data.vocab_size
 
 
@@ -42,7 +43,7 @@ BETA=0.1
 MAX_GRAD_NORM=5
 CHECKPOINT_PATH='baseline.pt'
 PRINT_EVERY=80 
-MAX_LR_DECAY_ITER=5
+MAX_LR_DECAY_ITER=10
 
 # SEED
 SEED=3435
@@ -105,6 +106,8 @@ for epoch in range(MAX_EPOCHS):
     b = 0
     f_list=[]
     # line 4
+    print('--------------------------------')
+    print('Epoch: %d, Learning Rate: %.4f, KL Weight: %.4f' % (epoch, LEARNING_RATE, kl_weight))
     for i in np.random.permutation(len(train_data)):
         # Data
         sentences, length, batch_size = train_data[i]
@@ -164,7 +167,7 @@ for epoch in range(MAX_EPOCHS):
                    torch.exp(train_nll_vae/num_words), 
                    train_kl_vae / num_sents,
                    torch.exp((train_nll_vae + train_kl_vae)/num_words),
-                   param_norm, best_val_nll, best_epoch, BETA,
+                   param_norm, best_val_nll, best_epoch, kl_weight,
                    num_sents / (time.time() - start_time)))
 
     # Line 17 
@@ -188,15 +191,23 @@ for epoch in range(MAX_EPOCHS):
         'model': model,
         'val_stats': val_stats
       }
-      print('NLL Loss for Validation: ',val_nll)
       print('Saving checkpoint to %s' % CHECKPOINT_PATH)      
       torch.save(checkpoint, CHECKPOINT_PATH)
       model.cuda()
+    print('NLL Loss for Validation for epoch ',epoch,'-',val_nll)
     print('--------------------------------')
 
-    if epoch - best_epoch >= 5:
-        LEARNING_RATE /= DECAY_FACTOR
+    if abs(epoch - best_epoch) >= 3:
+        LEARNING_RATE *= DECAY_FACTOR
         iter_learning_rate_decay+=1
+        best_epoch=epoch
     
     if iter_learning_rate_decay==MAX_LR_DECAY_ITER:
         break
+    
+
+# TESTING
+test_nll = eval(test_data, model,device)
+print('--------------------------------')
+print('NLL Loss for Test: ',test_nll)
+print('--------------------------------')
