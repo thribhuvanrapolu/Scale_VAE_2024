@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
-import utils.kl_loss as kl_loss
+import scale_utils.kl_loss as kl_loss
 
 
 

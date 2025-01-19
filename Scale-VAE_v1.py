@@ -18,8 +18,8 @@ from eval_scale_vae_v1 import eval
 
 
 # Dataset
-train_file='datasets/yahoo/yahoo-train.hdf5'
-val_file='datasets/yahoo/yahoo-val.hdf5'
+train_file='datasets_20percent/yahoo/yahoo-train-20percent.hdf5'
+val_file='datasets_20percent/yahoo/yahoo-val-20percent.hdf5'
 test_file='datasets/yahoo/yahoo-test.hdf5'
 train_data=Dataset(train_file)
 val_data=Dataset(val_file)
